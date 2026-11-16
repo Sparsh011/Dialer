@@ -53,7 +53,8 @@ class DialerInCallService : InCallService() {
                 .apply { setReferenceCounted(false) }
         }.getOrNull()
         scope.launch {
-            combine(CallManager.calls, CallManager.audio, ContactsRepo.state, Prefs.accent) { _, _, _, _ -> }.collect { refresh() }
+            combine(CallManager.calls, CallManager.audio, ContactsRepo.state, Prefs.accent, CallRecorder.state) { _, _, _, _, _ -> }
+                .collect { refresh() }
         }
     }
 
@@ -122,27 +123,34 @@ class DialerInCallService : InCallService() {
     }
 
     private fun updateForeground(primary: CallUi) {
-        val type = ServiceInfo.FOREGROUND_SERVICE_TYPE_PHONE_CALL
+        // While recording, the service must also be a "microphone" foreground service or Android
+        // cuts the mic the moment the call screen leaves the foreground (e.g. screen off at your ear).
+        val recording = CallRecorder.state.value != null
+        val phone = ServiceInfo.FOREGROUND_SERVICE_TYPE_PHONE_CALL
+        val wanted = if (recording && granted(Manifest.permission.RECORD_AUDIO)) {
+            phone or ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE
+        } else phone
         val name = CallManager.nameFor(primary)
-        val key = "${primary.id}|${primary.state}|${primary.connectTime}|$name|${Prefs.accent.value}"
-        if (type == foregroundType && key == lastNotificationKey) return
-        val notification = CallNotifications.build(this, primary, name)
-        val shown = runCatching {
-            if (type != foregroundType) {
-                startForeground(CallNotifications.ID, notification, type)
-                foregroundType = type
-            } else {
-                getSystemService(NotificationManager::class.java).notify(CallNotifications.ID, notification)
+        val key = "${primary.id}|${primary.state}|${primary.connectTime}|$name|${Prefs.accent.value}|$recording"
+        if (wanted == foregroundType && key == lastNotificationKey) return
+        val notification = CallNotifications.build(this, primary, name, recording)
+        if (wanted != foregroundType) {
+            val started = runCatching { startForeground(CallNotifications.ID, notification, wanted) }
+                .onFailure { Log.w("DialerInCallService", "Foreground type $wanted refused", it) }.isSuccess
+            if (started) {
+                foregroundType = wanted
+            } else if (foregroundType == 0) {
+                // Never leave the call without a foreground service: fall back to phone-call only.
+                runCatching { startForeground(CallNotifications.ID, notification, phone); foregroundType = phone }
             }
-            lastNotificationKey = key
-        }.onFailure { Log.w("DialerInCallService", "Couldn't update call foreground service type $type", it) }.isSuccess
-        if (!shown) runCatching {
-            getSystemService(NotificationManager::class.java).notify(CallNotifications.ID, notification)
         }
+        runCatching { getSystemService(NotificationManager::class.java).notify(CallNotifications.ID, notification) }
+        lastNotificationKey = key
     }
 
     override fun onDestroy() {
         scope.cancel()
+        CallRecorder.stop()
         runCatching { if (proximity?.isHeld == true) proximity?.release() }
         if (CallManager.service === this) CallManager.service = null
         getSystemService(NotificationManager::class.java).cancel(CallNotifications.ID)
@@ -185,7 +193,7 @@ object CallNotifications {
         PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
     )
 
-    fun build(context: Context, call: CallUi, name: String): Notification {
+    fun build(context: Context, call: CallUi, name: String, recording: Boolean = false): Notification {
         val open = PendingIntent.getActivity(
             context, 1, InCallActivity.intent(context),
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
@@ -214,7 +222,7 @@ object CallNotifications {
         } else {
             val text = when {
                 call.held -> "On hold"
-                call.active -> "Ongoing call$sim"
+                call.active -> if (recording) "Ongoing call · Recording" else "Ongoing call$sim"
                 else -> "Calling…"
             }
             Notification.Builder(context, CH_ONGOING)

@@ -447,8 +447,9 @@ private fun RecentSwipeActions(
                 }
             }
             .pointerInput(direction, canCall, revealPx) {
-                val threshold = minOf(120.dp.toPx(), size.width * 0.40f)
-                val limit = 144.dp.toPx()
+                // 25% more travel than before, so a casual sideways brush can't place a call.
+                val threshold = minOf(150.dp.toPx(), size.width * 0.50f)
+                val limit = 180.dp.toPx()
                 var beganRevealed = false
                 var vibrated = false
 
@@ -476,8 +477,13 @@ private fun RecentSwipeActions(
                     val crossed = if (beganRevealed) drag >= -revealPx / 2f
                         else drag <= -threshold || (canCall && drag >= threshold)
                     if (crossed && !vibrated) {
-                        haptics.select()
+                        // Armed: letting go now will act. Make that impossible to miss.
+                        haptics.strong()
                         vibrated = true
+                    } else if (!crossed && vibrated) {
+                        // Pulled back under the threshold: disarmed.
+                        haptics.release()
+                        vibrated = false
                     }
                 }
             },

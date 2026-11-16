@@ -1,6 +1,13 @@
 package com.sparsh.dialer.ui.settings
 
+import android.Manifest
 import android.content.Intent
+import android.provider.Settings
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.lifecycle.compose.LifecycleResumeEffect
+import com.sparsh.dialer.call.CallRecorder
+import com.sparsh.dialer.data.granted
 import android.media.MediaPlayer
 import android.telecom.TelecomManager
 import android.widget.Toast
@@ -56,6 +63,15 @@ fun SettingsScreen(vm: AppViewModel, isDefault: Boolean) {
     val tones by Prefs.tones.collectAsStateWithLifecycle()
     val recordings by vm.recordings.collectAsStateWithLifecycle()
     var editingAccent by rememberSaveable { mutableStateOf(false) }
+    val autoRecord by Prefs.autoRecord.collectAsStateWithLifecycle()
+    var recorderService by remember { mutableStateOf(CallRecorder.serviceEnabled(context)) }
+    LifecycleResumeEffect(Unit) {
+        recorderService = CallRecorder.serviceEnabled(context)
+        onPauseOrDispose { }
+    }
+    val mic = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { ok ->
+        if (ok) Prefs.setAutoRecord(true)
+    }
     BigHeaderList(title = "Settings", state = rememberLazyListState(), onBack = actions.back) {
         item {
             GroupLabel("Appearance")
@@ -101,10 +117,29 @@ fun SettingsScreen(vm: AppViewModel, isDefault: Boolean) {
                 }
             }
         }
-        if (recordings.isNotEmpty()) item {
-            GroupLabel("Saved recordings")
+        item {
+            GroupLabel("Call recording")
             SectionCard {
-                LinkRow(Icons.Rounded.GraphicEq, "Recordings", "${recordings.size} saved") { actions.open(Screen.Recordings()) }
+                ToggleRow(Icons.Rounded.FiberManualRecord, "Record every call", "Starts on its own once a call connects", autoRecord) {
+                    haptics.toggle(it)
+                    if (it && !context.granted(Manifest.permission.RECORD_AUDIO)) mic.launch(Manifest.permission.RECORD_AUDIO)
+                    else Prefs.setAutoRecord(it)
+                }
+                LinkRow(
+                    Icons.Rounded.Mic, "Allow recording during calls",
+                    if (recorderService) "On — Dialer can hear the call"
+                    else "Off — recordings will be silent. Tap, then turn on “Dialer call recording”",
+                ) { runCatching { context.startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)) } }
+                LinkRow(Icons.Rounded.GraphicEq, "Recordings", if (recordings.isEmpty()) "None yet" else "${recordings.size} saved") {
+                    actions.open(Screen.Recordings())
+                }
+                Text(
+                    "Android mutes the microphone for normal apps during a call; the accessibility switch above lifts that. " +
+                        "Your voice is always recorded. The other person is recorded through the phone's microphone, " +
+                        "so they are clearest on speaker.",
+                    style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(start = 20.dp, end = 20.dp, bottom = 16.dp, top = 4.dp),
+                )
             }
         }
         item {

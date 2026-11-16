@@ -1,3 +1,6 @@
 <resources>
     <string name="app_name">Dialer</string>
+    <string name="recorder_service_label">Dialer call recording</string>
+    <string name="recorder_service_summary">Lets Dialer keep recording while you are on a call</string>
+    <string name="recorder_service_description">Android mutes the microphone for ordinary apps during phone calls. Turning this on is what allows Dialer to record your calls.\n\nDialer does not read your screen, observe your actions or collect anything through this service — it listens to no events at all. Recordings stay on this phone.</string>
 </resources>

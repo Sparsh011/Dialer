@@ -172,7 +172,7 @@ private val CORE = arrayOf(
 private val ALL = CORE + arrayOf(
     Manifest.permission.WRITE_CALL_LOG, Manifest.permission.WRITE_CONTACTS,
     Manifest.permission.READ_PHONE_NUMBERS, Manifest.permission.POST_NOTIFICATIONS,
-    Manifest.permission.BLUETOOTH_CONNECT,
+    Manifest.permission.BLUETOOTH_CONNECT, Manifest.permission.RECORD_AUDIO,
 )
 
 fun isDefaultDialer(context: Context): Boolean =

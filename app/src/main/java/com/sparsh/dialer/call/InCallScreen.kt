@@ -1,6 +1,11 @@
 package com.sparsh.dialer.call
 
+import android.Manifest
 import android.content.Intent
+import android.os.SystemClock
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import com.sparsh.dialer.data.granted
 import android.graphics.RuntimeShader
 import android.telecom.Call
 import android.telecom.CallAudioState
@@ -210,6 +215,28 @@ fun InCallScreen(onFinish: () -> Unit) {
                     if (call.key.isNotEmpty() && !(keypad && phase == Phase.LIVE)) {
                         LastCallCard(call)
                     }
+                    AnimatedVisibility(
+                        phase == Phase.ENDED,
+                        enter = fadeIn(tween(220)) + expandVertically(spring(0.9f, 400f)),
+                        exit = fadeOut(tween(120)) + shrinkVertically(),
+                    ) {
+                        // Taps are ignored for a beat after the call ends, so a press that was
+                        // already on its way to another control can't land here.
+                        var armed by remember(call.id) { mutableStateOf(false) }
+                        LaunchedEffect(call.id) { delay(800); armed = true }
+                        Row(Modifier.padding(top = 28.dp), horizontalArrangement = Arrangement.spacedBy(28.dp)) {
+                            if (call.canCallBack && calls.none { !it.ended }) {
+                                EndedCallAction(Icons.Rounded.Call, "Call back", armed && !callingBack, AnswerGreen, Color.Black) {
+                                    Sims.refresh(context)
+                                    val sim = Sims.sims.value.firstOrNull { it.id == call.accountId }
+                                    callingBack = Dial.call(context, call.number, sim)
+                                    if (callingBack) haptics.confirm()
+                                    else Toast.makeText(context, "Couldn't place the call", Toast.LENGTH_SHORT).show()
+                                }
+                            }
+                            EndedCallAction(Icons.Rounded.Check, "Done", armed && !callingBack, Color(0xFF252528), Color.White, onClick = onFinish)
+                        }
+                    }
                 }
             }
 
@@ -259,6 +286,10 @@ fun InCallScreen(onFinish: () -> Unit) {
                             }
 
                             Phase.LIVE -> {
+                                if (!keypad) {
+                                    RecordPill(call)
+                                    Spacer(Modifier.height(22.dp))
+                                }
                                 AnimatedContent(
                                     keypad,
                                     transitionSpec = {
@@ -389,20 +420,9 @@ fun InCallScreen(onFinish: () -> Unit) {
 
                             Phase.ENDING -> Spacer(Modifier.height(74.dp))
 
-                            Phase.ENDED -> {
-                                Row(horizontalArrangement = Arrangement.spacedBy(24.dp)) {
-                                    if (call.canCallBack && calls.none { !it.ended }) {
-                                        EndedCallAction(Icons.Rounded.Call, "Call back", !callingBack, AnswerGreen, Color.Black) {
-                                            Sims.refresh(context)
-                                            val sim = Sims.sims.value.firstOrNull { it.id == call.accountId }
-                                            callingBack = Dial.call(context, call.number, sim)
-                                            if (callingBack) haptics.confirm()
-                                            else Toast.makeText(context, "Couldn't place the call", Toast.LENGTH_SHORT).show()
-                                        }
-                                    }
-                                    EndedCallAction(Icons.Rounded.Check, "Done", !callingBack, Color(0xFF252528), Color.White, onClick = onFinish)
-                                }
-                            }
+                            // Deliberately empty: nothing tappable may appear where End call was a
+                            // moment ago. Call back / Done live under the name instead.
+                            Phase.ENDED -> Spacer(Modifier.height(74.dp))
                         }
                     }
                 }
@@ -547,6 +567,81 @@ private fun LastCallCard(call: CallUi) {
     }
 }
 
+/**
+ * Record toggle that doubles as the recording status: idle → "Record call", live → red dot and
+ * timer, and an amber warning if Android is handing us silence.
+ */
+@Composable
+private fun RecordPill(call: CallUi) {
+    val context = LocalContext.current
+    val haptics = rememberHaptics()
+    val recording by CallRecorder.state.collectAsState()
+    val on = recording != null
+    val silent = recording?.silent == true
+    val enabled = on || call.active || call.held
+
+    fun begin() {
+        if (!CallRecorder.start(context, call)) {
+            Toast.makeText(context, "Couldn't start recording", Toast.LENGTH_SHORT).show()
+        } else if (!CallRecorder.serviceEnabled(context)) {
+            Toast.makeText(
+                context, "Turn on “Dialer call recording” in Settings → Accessibility, or Android will mute this recording",
+                Toast.LENGTH_LONG,
+            ).show()
+        }
+    }
+    val permission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { ok -> if (ok) begin() }
+
+    val now by produceState(SystemClock.elapsedRealtime(), on) {
+        while (on) { value = SystemClock.elapsedRealtime(); delay(500) }
+    }
+    val tint by animateColorAsState(
+        when { silent -> Color(0xFFFFB454); on -> DeclineRed; else -> Color.White }, label = "Record tint",
+    )
+    val fill by animateColorAsState(
+        when { silent -> Color(0xFFFFB454).copy(alpha = 0.16f); on -> DeclineRed.copy(alpha = 0.18f); else -> Color.White.copy(alpha = 0.09f) },
+        label = "Record fill",
+    )
+    val blink = if (on && !silent) {
+        rememberInfiniteTransition(label = "Recording").animateFloat(
+            1f, 0.25f, infiniteRepeatable(tween(700), RepeatMode.Reverse), label = "Recording dot",
+        )
+    } else null
+
+    Row(
+        Modifier
+            .graphicsLayer { alpha = if (enabled) 1f else 0.35f }
+            .pressable(CircleShape, 0.94f, enabled = enabled, haptic = false) {
+                haptics.toggle(!on)
+                when {
+                    on -> CallRecorder.stop()
+                    !context.granted(Manifest.permission.RECORD_AUDIO) -> permission.launch(Manifest.permission.RECORD_AUDIO)
+                    else -> begin()
+                }
+            }
+            .background(fill)
+            .border(1.dp, tint.copy(alpha = if (on) 0.35f else 0.10f), CircleShape)
+            .animateContentSize(spring(0.8f, 400f))
+            .padding(horizontal = 18.dp, vertical = 11.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Box(
+            Modifier.size(10.dp).graphicsLayer { alpha = blink?.value ?: 1f }
+                .then(if (on) Modifier.background(tint, CircleShape) else Modifier.border(2.dp, tint, CircleShape)),
+        )
+        Spacer(Modifier.width(10.dp))
+        Text(
+            when {
+                silent -> "No audio captured — check Settings"
+                on -> "Recording  ${Fmt.clock((now - (recording?.startedElapsed ?: now)) / 1000)}"
+                else -> "Record call"
+            },
+            style = MaterialTheme.typography.labelLarge.copy(fontFeatureSettings = "tnum"), color = if (on) tint else Color.White,
+            maxLines = 1,
+        )
+    }
+}
+
 @Composable
 private fun CallControl(
     icon: ImageVector,
@@ -618,7 +713,10 @@ private fun EndedCallAction(
     Column(horizontalAlignment = Alignment.CenterHorizontally) {
         FilledIconButton(
             onClick = onClick, enabled = enabled, modifier = Modifier.size(58.dp), shape = CircleShape,
-            colors = IconButtonDefaults.filledIconButtonColors(containerColor = background, contentColor = foreground),
+            colors = IconButtonDefaults.filledIconButtonColors(
+                containerColor = background, contentColor = foreground,
+                disabledContainerColor = background, disabledContentColor = foreground,
+            ),
         ) {
             Icon(icon, label, Modifier.size(24.dp))
         }

@@ -31,12 +31,33 @@ class Haptics(private val view: View) {
     fun reject() = go(H.REJECT)
     fun dragStart() = go(H.GESTURE_START)
     fun dragEnd() = go(H.GESTURE_END)
+    /**
+     * A firm, unmistakable thump for gestures that commit to something (swipe-to-call).
+     * Drives the motor directly at full amplitude instead of the platform's light touch ticks.
+     */
+    fun strong() = pulse(view.context, longArrayOf(0, 38), intArrayOf(0, 255), VibrationEffect.EFFECT_HEAVY_CLICK)
+
+    /** Lighter counterpart, used when a gesture drops back below its threshold. */
+    fun release() = pulse(view.context, longArrayOf(0, 16), intArrayOf(0, 140), VibrationEffect.EFFECT_TICK)
+
     fun toggle(on: Boolean) =
         go(if (Build.VERSION.SDK_INT >= 34) (if (on) H.TOGGLE_ON else H.TOGGLE_OFF) else H.CONTEXT_CLICK)
 
     companion object {
         private fun vibrator(context: Context): Vibrator =
             context.getSystemService(VibratorManager::class.java).defaultVibrator
+
+        private fun pulse(context: Context, timings: LongArray, amplitudes: IntArray, fallback: Int) {
+            if (!Prefs.haptics.value) return
+            runCatching {
+                val v = vibrator(context)
+                if (!v.hasVibrator()) return
+                v.vibrate(
+                    if (v.hasAmplitudeControl()) VibrationEffect.createWaveform(timings, amplitudes, -1)
+                    else VibrationEffect.createPredefined(fallback),
+                )
+            }
+        }
 
         private fun compose(context: Context, fallback: LongArray, build: VibrationEffect.Composition.() -> Unit, vararg prims: Int) {
             if (!Prefs.haptics.value) return

@@ -9,6 +9,7 @@ import android.telecom.TelecomManager
 import android.telecom.VideoProfile
 import androidx.compose.runtime.Immutable
 import com.sparsh.dialer.data.ContactsRepo
+import com.sparsh.dialer.data.Prefs
 import com.sparsh.dialer.util.Fmt
 import com.sparsh.dialer.util.Haptics
 import kotlinx.coroutines.CoroutineScope
@@ -165,6 +166,7 @@ object CallManager {
         if (now == Call.STATE_ACTIVE && prev != Call.STATE_HOLDING) {
             // The other side picked up (or we answered): tactile confirmation.
             Haptics.callAnswered(context)
+            if (Prefs.autoRecord.value) snapshot(call, id).let { CallRecorder.start(context, it) }
         }
         if (now == Call.STATE_DISCONNECTED) {
             Haptics.callEnded(context)
@@ -177,6 +179,7 @@ object CallManager {
         lastState.remove(id)
         answering.remove(id)
         ending.remove(id)
+        if (CallRecorder.state.value?.callId == id) CallRecorder.stop()
         if (call.parent == null && ids.keys.none { it.parent == null }) _ended.value = ui
         publish()
     }

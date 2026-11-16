@@ -15,6 +15,7 @@ object Prefs {
     private val _haptics = MutableStateFlow(true)
     private val _tones = MutableStateFlow(true)
     private val _onboarded = MutableStateFlow(false)
+    private val _autoRecord = MutableStateFlow(false)
 
     /** 0 = follow system, 1 = light, 2 = dark */
     val theme: StateFlow<Int> = _theme
@@ -22,6 +23,7 @@ object Prefs {
     val haptics: StateFlow<Boolean> = _haptics
     val tones: StateFlow<Boolean> = _tones
     val onboarded: StateFlow<Boolean> = _onboarded
+    val autoRecord: StateFlow<Boolean> = _autoRecord
 
     fun init(context: Context) {
         if (::sp.isInitialized) return
@@ -31,11 +33,13 @@ object Prefs {
         _haptics.value = sp.getBoolean("haptics", true)
         _tones.value = sp.getBoolean("tones", true)
         _onboarded.value = sp.getBoolean("onboarded", false)
+        _autoRecord.value = sp.getBoolean("autoRecord", false)
     }
 
     fun setTheme(v: Int) { _theme.value = v; sp.edit().putInt("theme", v).apply() }
     fun setAccent(v: Int) { _accent.value = v; sp.edit().putInt("accent", v).apply() }
     fun setHaptics(v: Boolean) { _haptics.value = v; sp.edit().putBoolean("haptics", v).apply() }
     fun setTones(v: Boolean) { _tones.value = v; sp.edit().putBoolean("tones", v).apply() }
+    fun setAutoRecord(v: Boolean) { _autoRecord.value = v; sp.edit().putBoolean("autoRecord", v).apply() }
     fun setOnboarded(v: Boolean) { _onboarded.value = v; sp.edit().putBoolean("onboarded", v).apply() }
 }
